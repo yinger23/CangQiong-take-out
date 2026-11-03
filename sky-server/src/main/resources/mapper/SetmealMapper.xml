@@ -5,9 +5,23 @@
 
 
     <insert id="insert" parameterType="Setmeal" useGeneratedKeys="true" keyProperty="id">
-        insert into setmeal (name, price, image, category_id, status, create_time, update_time, description)
-        values ( #{name}, #{price}, #{image}, #{categoryId}, #{status}, #{createTime}, #{updateTime}, #{description})
+        insert into setmeal (name, price, image, category_id, status, create_time, update_time, description,update_user,create_user)
+        values ( #{name}, #{price}, #{image}, #{categoryId}, #{status}, #{createTime}, #{updateTime}, #{description},#{createUser},#{updateUser})
     </insert>
+    <update id="update" parameterType="Setmeal" useGeneratedKeys="true" keyProperty="id">
+        update setmeal
+        <set>
+            <if test="name != null">name = #{name},</if>
+            <if test="price != null">price = #{price},</if>
+            <if test="image != null">image = #{image},</if>
+            <if test="categoryId != null">category_id = #{categoryId},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+            <if test="description != null">description = concat('%', #{description}, '%')</if>
+            <if test="updateUser != null">update_user = #{updateUser}</if>
+        </set>
+        where id = #{id}
+    </update>
     <select id="pageQuery" resultType="com.sky.vo.SetmealVO">
         select s.*, c.name as category_name
         from setmeal s
@@ -23,5 +37,13 @@
                 and s.status = #{status}
             </if>
         </where> order by s.create_time desc
+    </select>
+    <select id="list" parameterType="Setmeal" resultType="Setmeal">
+        select * from setmeal
+        <where>
+            <if test="name != null"> and name like concat('%',#{name},'%') </if>
+            <if test="categoryId != null"> and category_id = #{categoryId} </if>
+            <if test="status != null"> and status = #{status} </if>
+        </where>
     </select>
 </mapper>
