@@ -1,8 +1,10 @@
 package com.sky.service.impl;
 
-import com.alibaba.fastjson.JSONObject;
+import com.github.pagehelper.Page;
+import com.github.pagehelper.PageHelper;
 import com.sky.constant.MessageConstant;
 import com.sky.context.BaseContext;
+import com.sky.dto.OrdersPageQueryDTO;
 import com.sky.dto.OrdersPaymentDTO;
 import com.sky.dto.OrdersSubmitDTO;
 import com.sky.entity.*;
@@ -10,10 +12,12 @@ import com.sky.exception.AddressBookBusinessException;
 import com.sky.exception.OrderBusinessException;
 import com.sky.exception.ShoppingCartBusinessException;
 import com.sky.mapper.*;
+import com.sky.result.PageResult;
 import com.sky.service.OrderService;
 import com.sky.utils.WeChatPayUtil;
 import com.sky.vo.OrderPaymentVO;
 import com.sky.vo.OrderSubmitVO;
+import com.sky.vo.OrderVO;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -23,6 +27,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class OrderServiceImpl implements OrderService {
@@ -148,5 +153,90 @@ public class OrderServiceImpl implements OrderService {
                 .build();
 
         orderMapper.update(orders);
+    }
+
+    @Override
+    public PageResult pageQuery4User(int pageNum, int pageSize, Integer status) {
+        // 设置分页
+        PageHelper.startPage(pageNum, pageSize);
+        // 分页查询用户订单
+        OrdersPageQueryDTO ordersPageQueryDTO = new OrdersPageQueryDTO();
+        ordersPageQueryDTO.setUserId(BaseContext.getCurrentId());
+        ordersPageQueryDTO.setStatus(status);
+        Page<Orders> page = orderMapper.pageQuery(ordersPageQueryDTO);
+
+
+        List<OrderVO> list = new ArrayList<>();
+        //查询订单详情，封装VO
+        for (Orders orders : page.getResult()) {
+            OrderVO orderVO = new OrderVO();
+            BeanUtils.copyProperties(orders, orderVO);
+            orderVO.setOrderDetailList(orderDetailMapper.getByOrderId(orders.getId()));
+            list.add(orderVO);
+        }
+
+        return new PageResult(page.getTotal(), list);
+    }
+
+    @Override
+    public OrderVO details(Long id) {
+        Orders orders = orderMapper.getById(id);
+        OrderVO orderVO = new OrderVO();
+        BeanUtils.copyProperties(orders, orderVO);
+        orderVO.setOrderDetailList(orderDetailMapper.getByOrderId(id));
+        return orderVO;
+    }
+
+    @Override
+    public void userCancelById(Long id) throws Exception {
+        // 根据订单id查询订单
+        Orders ordersDB = orderMapper.getById(id);
+        // 校验订单是否存在
+        if (ordersDB == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+        //订单状态 1待付款 2待接单 3已接单 4派送中 5已完成 6已取消
+        if (ordersDB.getStatus() >Orders.TO_BE_CONFIRMED) {
+            throw new OrderBusinessException(MessageConstant.ORDER_STATUS_ERROR);
+        }
+        Orders orders = new Orders();
+        orders.setId(ordersDB.getId());
+        if(ordersDB.getStatus().equals(Orders.TO_BE_CONFIRMED)) {
+            weChatPayUtil.refund(
+                    ordersDB.getNumber(), //商户订单号
+                    ordersDB.getNumber(), //商户退款单号
+                    new BigDecimal(0.01),//退款金额，单位 元
+                    new BigDecimal(0.01));//原订单金额
+
+            //支付状态修改为 退款
+            orders.setPayStatus(Orders.REFUND);
+        }
+        // 更新订单状态、取消原因、取消时间
+        orders.setStatus(Orders.CANCELLED);
+        orders.setCancelReason("用户取消订单");
+        orders.setCancelTime(LocalDateTime.now());
+        orderMapper.update(orders);
+    }
+
+    @Override
+    public void repetition(Long id) {
+        Long userId = BaseContext.getCurrentId();
+        Orders ordersDB = orderMapper.getById(id);
+        // 根据订单id查询当前订单详情
+        List<OrderDetail> orderDetailList = orderDetailMapper.getByOrderId(id);
+        // 将订单详情对象转换为购物车对象
+        List<ShoppingCart> shoppingCartList = orderDetailList.stream().map(orderDetail -> {
+            ShoppingCart shoppingCart = new ShoppingCart();
+            //将原订单详情对象的菜品信息赋值给购物车对象
+            BeanUtils.copyProperties(orderDetail, shoppingCart, "id");
+            //设置用户id
+            shoppingCart.setUserId(userId);
+            //设置创建时间
+            shoppingCart.setCreateTime(LocalDateTime.now());
+            return shoppingCart;
+
+        }).collect(Collectors.toList());
+        // 插入购物车数据
+        shoppingCartMapper.insertBatch(shoppingCartList);
     }
 }
